@@ -163,12 +163,14 @@ func (h *Inbound) newConnectionEx(ctx context.Context, conn net.Conn, metadata a
 		N.CloseOnHandshakeFailure(conn, onClose, os.ErrInvalid)
 		return
 	}
-	user := h.users[userIndex].Name
-	if user == "" {
-		user = F.ToString(userIndex)
+	user := h.users[userIndex]
+	if user.Name == "" {
+		user.Name = F.ToString(userIndex)
 	} else {
-		metadata.User = user
+		metadata.User = user.Name
 	}
+	metadata.UserId = user.UUID
+
 	h.logger.InfoContext(ctx, "[", user, "] inbound connection to ", metadata.Destination)
 	h.router.RouteConnectionEx(ctx, conn, metadata, onClose)
 }
@@ -181,12 +183,13 @@ func (h *Inbound) newPacketConnectionEx(ctx context.Context, conn N.PacketConn, 
 		N.CloseOnHandshakeFailure(conn, onClose, os.ErrInvalid)
 		return
 	}
-	user := h.users[userIndex].Name
-	if user == "" {
-		user = F.ToString(userIndex)
+	user := h.users[userIndex]
+	if user.Name == "" {
+		user.Name = F.ToString(userIndex)
 	} else {
-		metadata.User = user
+		metadata.User = user.Name
 	}
+	metadata.UserId = user.UUID
 	if metadata.Destination.Fqdn == packetaddr.SeqPacketMagicAddress {
 		metadata.Destination = M.Socksaddr{}
 		conn = packetaddr.NewConn(conn.(vmess.PacketConn), metadata.Destination)

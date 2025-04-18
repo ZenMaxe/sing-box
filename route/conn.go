@@ -3,6 +3,8 @@ package route
 import (
 	"context"
 	"errors"
+	"github.com/google/uuid"
+	"github.com/sagernet/sing-box/internal/session"
 	"io"
 	"net"
 	"net/netip"
@@ -71,6 +73,31 @@ func (m *ConnectionManager) NewConnection(ctx context.Context, this N.Dialer, co
 		m.logger.ErrorContext(ctx, err)
 		return
 	}
+
+	// Add the Connection to Map
+	connId, err := uuid.NewUUID()
+	if err != nil {
+		err = E.Cause(err, "generate connection id")
+		N.CloseOnHandshakeFailure(conn, onClose, err)
+		m.logger.ErrorContext(ctx, err)
+		return
+	}
+
+	stringConnId := connId.String()
+
+	if metadata.UserId != "" {
+		hasAccess := session.Shared.OnConnect(metadata.UserId, stringConnId)
+
+		if !hasAccess {
+			err := errors.New("connection rejected: too many active devices")
+			N.CloseOnHandshakeFailure(conn, onClose, err)
+			return
+		}
+	}
+
+	// Attach to connection
+	ctx = context.WithValue(ctx, session.ConnIdKey, stringConnId)
+
 	err = N.ReportConnHandshakeSuccess(conn, remoteConn)
 	if err != nil {
 		err = E.Cause(err, "report handshake success")
@@ -101,6 +128,19 @@ func (m *ConnectionManager) NewConnection(ctx context.Context, this N.Dialer, co
 		m.access.Lock()
 		defer m.access.Unlock()
 		m.connections.Remove(element)
+
+		go func() {
+			val := ctx.Value(session.ConnIdKey)
+			if val == nil {
+				return
+			}
+			connId, ok := val.(string)
+			if !ok {
+				return
+			}
+			session.Shared.OnDisconnect(metadata.User, connId)
+		}()
+
 	})
 	var done atomic.Bool
 	go m.connectionCopy(ctx, conn, remoteConn, false, &done, onClose)
@@ -154,6 +194,17 @@ func (m *ConnectionManager) NewPacketConnection(ctx context.Context, this N.Dial
 			return
 		}
 	}
+
+	if metadata.UserId != "" {
+		val := ctx.Value(session.ConnIdKey)
+		if val != nil {
+			connId, ok := val.(string)
+			if ok {
+				session.Shared.Touch(metadata.UserId, connId)
+			}
+		}
+	}
+
 	err = N.ReportPacketConnHandshakeSuccess(conn, remotePacketConn)
 	if err != nil {
 		conn.Close()
@@ -161,6 +212,7 @@ func (m *ConnectionManager) NewPacketConnection(ctx context.Context, this N.Dial
 		m.logger.ErrorContext(ctx, "report handshake success: ", err)
 		return
 	}
+
 	if destinationAddress.IsValid() {
 		var originDestination M.Socksaddr
 		if metadata.RouteOriginalDestination.IsValid() {
