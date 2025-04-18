@@ -73,8 +73,8 @@ func (m *Manager) OnConnect(uuid, connId string) bool {
 
 func (m *Manager) OnDisconnect(uuid, connId string) {
 	m.lock.Lock()
-
 	defer m.lock.Unlock()
+
 	sessions, ok := m.activeSessions[uuid]
 	if !ok {
 		return
